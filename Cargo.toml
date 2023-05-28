@@ -6,7 +6,7 @@ authors = ["Mykhailo Osypov <mykhailo.osypov@gmail.com>"]
 edition = "2018"
 readme = "README.md"
 license = "Apache-2.0"
-homepage = "https://github.com/delta-io/delta.rs"
+homepage = "https://github.com/delta-incubator/dynamodb-lock-rs"
 
 [dependencies]
 async-trait = "0.1"

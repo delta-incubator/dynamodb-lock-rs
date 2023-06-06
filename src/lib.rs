@@ -341,6 +341,12 @@ impl std::fmt::Debug for DynamoDbLockClient {
     }
 }
 
+impl Default for DynamoDbLockClient {
+    fn default() -> Self {
+        Self::for_region(Region::UsEast1)
+    }
+}
+
 #[async_trait::async_trait]
 impl LockClient for DynamoDbLockClient {
     async fn try_acquire_lock(&self, data: &str) -> Result<Option<LockItem>, DynamoError> {

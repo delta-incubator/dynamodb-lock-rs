@@ -6,8 +6,14 @@ use std::fmt::Debug;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use maplit::hashmap;
+/// Re-export of [rusuto_core::Region] for convenience
+pub use rusoto_core::Region;
 use rusoto_core::RusotoError;
+#[cfg(feature = "sts")]
+use rusoto_credential::{AutoRefreshingProvider, CredentialsError};
 use rusoto_dynamodb::*;
+#[cfg(feature = "sts")]
+use rusoto_sts::WebIdentityProvider;
 use uuid::Uuid;
 
 /// A lock that has been successfully acquired
@@ -53,8 +59,6 @@ pub trait LockClient: Send + Sync + Debug {
     /// successfully released, and false if someone else already stole the lock
     async fn release_lock(&self, lock: &LockItem) -> Result<bool, DynamoError>;
 }
-
-pub const DEFAULT_MAX_RETRY_ACQUIRE_LOCK_ATTEMPTS: u32 = 10_000;
 
 /// DynamoDb option keys to use when creating DynamoDbOptions.
 /// The same key should be used whether passing a key in the hashmap or setting it as an environment variable.
@@ -181,6 +185,11 @@ impl LockItem {
 /// Error returned by the [`DynamoDbLockClient`] API.
 #[derive(thiserror::Error, Debug, PartialEq)]
 pub enum DynamoError {
+    #[cfg(feature = "sts")]
+    /// Error of the underlying authentication mechanism
+    #[error("Failed to authenticate: {0}")]
+    AuthenticationError(CredentialsError),
+
     /// Error caused by the DynamoDB table not being created.
     #[error("Dynamo table not found")]
     TableNotFound,
@@ -245,6 +254,13 @@ impl From<RusotoError<PutItemError>> for DynamoError {
     }
 }
 
+#[cfg(feature = "sts")]
+impl From<CredentialsError> for DynamoError {
+    fn from(error: CredentialsError) -> Self {
+        DynamoError::AuthenticationError(error)
+    }
+}
+
 impl From<RusotoError<GetItemError>> for DynamoError {
     fn from(error: RusotoError<GetItemError>) -> Self {
         match error {
@@ -304,8 +320,16 @@ mod vars {
     pub const OWNER_NAME_VALUE: &str = ":on";
 }
 
-/// Provides a simple library for using DynamoDB's consistent read/write feature
-/// to use it for managing distributed locks.
+/**
+ * Provides a simple library for using DynamoDB's consistent read/write feature to use it for
+ * managing distributed locks.
+ *
+ * ```rust
+ * use dynamodb_lock::{DynamoDbLockClient, Region};
+ *
+ * let lock = DynamoDbLockClient::for_region(Region::UsEast2);
+ * ```
+ */
 pub struct DynamoDbLockClient {
     client: DynamoDbClient,
     opts: DynamoDbOptions,
@@ -314,6 +338,12 @@ pub struct DynamoDbLockClient {
 impl std::fmt::Debug for DynamoDbLockClient {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(fmt, "DynamoDbLockClient")
+    }
+}
+
+impl Default for DynamoDbLockClient {
+    fn default() -> Self {
+        Self::for_region(Region::UsEast1)
     }
 }
 
@@ -337,8 +367,25 @@ impl LockClient for DynamoDbLockClient {
 }
 
 impl DynamoDbLockClient {
+    /// construct a new DynamoDbLockClient for the given region
+    pub fn for_region(region: Region) -> Self {
+        Self::new(DynamoDbClient::new(region), DynamoDbOptions::default())
+    }
+
+    /// Provide the given DynamoDbLockClient with a fully custom [rusoto_dynamodb::DynamoDbClient]
+    pub fn with_client(mut self, client: DynamoDbClient) -> Self {
+        self.client = client;
+        self
+    }
+
+    /// Add the given [DynamoDbOptions]
+    pub fn with_options(mut self, options: DynamoDbOptions) -> Self {
+        self.opts = options;
+        self
+    }
+
     /// Creates new DynamoDB lock client
-    pub fn new(client: DynamoDbClient, opts: DynamoDbOptions) -> Self {
+    fn new(client: DynamoDbClient, opts: DynamoDbOptions) -> Self {
         Self { client, opts }
     }
 
@@ -691,6 +738,12 @@ impl<'a> AcquireLockState<'a> {
             )
             .await
     }
+}
+
+#[cfg(feature = "sts")]
+fn get_web_identity_provider() -> Result<AutoRefreshingProvider<WebIdentityProvider>, DynamoError> {
+    let provider = WebIdentityProvider::from_k8s_env();
+    Ok(AutoRefreshingProvider::new(provider)?)
 }
 
 #[cfg(test)]

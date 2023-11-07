@@ -533,7 +533,7 @@ impl DynamoDbLockClient {
             PARTITION_KEY_NAME.to_string() => attr(self.opts.partition_key_value.clone()),
             OWNER_NAME.to_string() => attr(&self.opts.owner_name),
             RECORD_VERSION_NUMBER.to_string() => attr(&rvn),
-            LEASE_DURATION.to_string() => attr(self.opts.lease_duration),
+            LEASE_DURATION.to_string() => num_attr(lease_duration_after(self.opts.lease_duration)),
         };
 
         if let Some(d) = data {
@@ -590,6 +590,15 @@ impl DynamoDbLockClient {
     }
 }
 
+/// Return a u64 lease duration the given seconds from the current time
+fn lease_duration_after(after: u64) -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        + after
+}
+
 fn now_millis() -> u128 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -601,6 +610,13 @@ fn now_millis() -> u128 {
 fn attr<T: ToString>(s: T) -> AttributeValue {
     AttributeValue {
         s: Some(s.to_string()),
+        ..Default::default()
+    }
+}
+
+fn num_attr<T: ToString>(s: T) -> AttributeValue {
+    AttributeValue {
+        n: Some(s.to_string()),
         ..Default::default()
     }
 }
@@ -842,5 +858,31 @@ mod tests {
             },
             options
         );
+    }
+
+    #[test]
+    fn test_lease_duration_after() {
+        use std::time::SystemTime;
+        let now = match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
+            Ok(n) => n.as_secs(),
+            Err(_) => panic!("SystemTime before UNIX EPOCH!"),
+        };
+        let duration: u64 = lease_duration_after(60);
+
+        assert!(duration > now);
+        assert!(duration >= (now + 60));
+        assert!(duration <= (now + 70));
+    }
+
+    #[test]
+    fn test_lease_duration_attr() {
+        let n = num_attr(1);
+        assert!(n.n.is_some());
+        if let Some(num) = n.n {
+            assert_eq!(1, num.parse::<u64>().unwrap());
+        } else {
+            println!("attr {n:?}");
+            assert!(false);
+        }
     }
 }

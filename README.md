@@ -14,14 +14,12 @@ Usage
 -----
 
 ```rust
-let dynamodb_client = rusoto_dynamodb::DynamoDbClient::new(rusoto_core::Region::default());
-let lock_client = dynamodb_lock::DynamoDbLockClient::new(
-    dynamodb_client,
-    dynamodb_lock::DynamoDbOptions::default(),
-);
+let region = dynamodb_lock::Region::default();
+// This will use the default options
+let lock_client = dynamodb_lock::DynamoDbLockClient::for_region(region);
 
 let lock_data = "Moe";
-let lock = lock_client.try_acquire_lock(lock_data).await?.unwrap();
+let lock = lock_client.try_acquire_lock(Some(lock_data)).await?.unwrap();
 
 if lock.acquired_expired_lock {
     // error handling when acquired an expired lock

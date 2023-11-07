@@ -26,6 +26,9 @@ rusoto_sts = { version ="0.47", default-features = false, optional = true }
 maplit = "1"
 tokio = { version = "1", features = ["fs", "macros", "rt", "io-util"] }
 
+[dev-dependencies]
+pretty_env_logger = "*"
+
 [features]
 default = ["rustls"]
 sts = ["rusoto_sts",

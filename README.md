@@ -19,7 +19,7 @@ let region = dynamodb_lock::Region::default();
 let lock_client = dynamodb_lock::DynamoDbLockClient::for_region(region);
 
 let lock_data = "Moe";
-let lock = lock_client.try_acquire_lock(lock_data).await?.unwrap();
+let lock = lock_client.try_acquire_lock(Some(lock_data)).await?.unwrap();
 
 if lock.acquired_expired_lock {
     // error handling when acquired an expired lock

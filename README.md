@@ -52,10 +52,6 @@ resource "aws_dynamodb_table" "oxbow_locking" {
     type = "S"
   }
   # The leaseDuration is used by dynamodb-lock-rs and *must* be a Number type
-  attribute {
-    name = "leaseDuration"
-    type = "N"
-  }
   ttl {
     attribute_name = "leaseDuration"
     enabled        = true

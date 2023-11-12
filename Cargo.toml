@@ -1,7 +1,7 @@
 [package]
 name = "dynamodb_lock"
 description = "Distributed lock backed by Dynamodb"
-version = "0.6.0"
+version = "0.6.1"
 authors = [
     "Mykhailo Osypov <mykhailo.osypov@gmail.com>",
     "R Tyler Croy <rtyler@brokenco.de>",
@@ -27,7 +27,7 @@ maplit = "1"
 tokio = { version = "1", features = ["fs", "macros", "rt", "io-util"] }
 
 [dev-dependencies]
-pretty_env_logger = "*"
+pretty_env_logger = "0.5"
 
 [features]
 default = ["rustls"]

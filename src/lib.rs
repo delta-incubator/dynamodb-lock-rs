@@ -97,9 +97,9 @@ pub struct DynamoDbOptions {
     pub owner_name: String,
     /// The amount of time (in seconds) that the owner has for the acquired lock.
     pub lease_duration: u64,
-    /// The amount of time to wait before trying to get the lock again in milliseconds. Defaults to 1000ms (1 second).
+    /// The amount of time to wait before trying to get the lock again in milliseconds. Defaults to 10000ms (10s).
     pub refresh_period: Duration,
-    /// The amount of time to wait in addition to `lease_duration`.
+    /// The amount of time to wait in addition to `lease_duration`. Defaults to 10000ms (10s)
     pub additional_time_to_wait_for_lock: Duration,
 }
 
@@ -116,12 +116,12 @@ impl DynamoDbOptions {
         let refresh_period = Duration::from_millis(Self::u64_opt(
             &options,
             dynamo_lock_options::DYNAMO_LOCK_REFRESH_PERIOD_MILLIS,
-            1000,
+            10_000,
         ));
         let additional_time_to_wait_for_lock = Duration::from_millis(Self::u64_opt(
             &options,
             dynamo_lock_options::DYNAMO_LOCK_ADDITIONAL_TIME_TO_WAIT_MILLIS,
-            1000,
+            10_000,
         ));
 
         Self {
@@ -176,7 +176,18 @@ impl LockItem {
         match self.lease_duration {
             None => false,
             Some(lease_duration) => {
-                now_millis() - self.lookup_time > (lease_duration as u128) * 1000
+                let lease_duration = lease_duration as u128;
+
+                // Old-style lease duration, see
+                // <https://github.com/delta-incubator/dynamodb-lock-rs/issues/3>
+                if lease_duration < (365 * 86400) {
+                    // If somebody set a lease duration for a value more than a calendar year,
+                    // we're going to just treat that as if it's a new style lock :laughing:
+                    now_millis() - self.lookup_time > (lease_duration * 1000)
+                } else {
+                    // New-style lease duration
+                    lease_duration < self.lookup_time
+                }
             }
         }
     }
@@ -637,7 +648,7 @@ struct AcquireLockState<'a> {
 
 impl<'a> AcquireLockState<'a> {
     /// If lock is expirable (lease_duration is set) then this function returns `true`
-    /// if the elapsed time sine `started` is reached `timeout_in`.
+    /// if the elapsed time since `started` is reached `timeout_in`.
     fn has_timed_out(&self) -> bool {
         self.started.elapsed() > self.timeout_in && {
             let non_expirable = if let Some(ref cached_lock) = self.cached_lock {
@@ -884,5 +895,71 @@ mod tests {
             println!("attr {n:?}");
             assert!(false);
         }
+    }
+
+    #[test]
+    fn test_lockitem_normal_lease() {
+        let item = LockItem {
+            owner_name: "test".into(),
+            record_version_number: "1".into(),
+            lease_duration: None,
+            is_released: false,
+            data: Some("test-data".into()),
+            lookup_time: now_millis(),
+            acquired_expired_lock: false,
+            is_non_acquirable: true,
+        };
+        assert_eq!(false, item.is_expired());
+    }
+
+    #[test]
+    fn test_lockitem_is_released() {
+        let item = LockItem {
+            owner_name: "test".into(),
+            record_version_number: "1".into(),
+            lease_duration: None,
+            is_released: true,
+            data: Some("test-data".into()),
+            lookup_time: now_millis(),
+            acquired_expired_lock: false,
+            is_non_acquirable: true,
+        };
+        assert_eq!(true, item.is_expired());
+    }
+
+    #[test]
+    fn test_lockitem_expired_oldstyle_lease_duration() {
+        let item = LockItem {
+            owner_name: "test".into(),
+            record_version_number: "1".into(),
+            // Lease duration used to be a number of seconds (e.g. 60) which was wrong because
+            // DynamoDb needs a seconds since epoch. This pretends to be an old style value
+            lease_duration: Some(60),
+            is_released: false,
+            data: Some("test-data".into()),
+            // For the test we'll pretend we looked up 2 minutes ago
+            lookup_time: (now_millis() - (2 * 60000)),
+            acquired_expired_lock: false,
+            is_non_acquirable: true,
+        };
+        assert_eq!(true, item.is_expired());
+    }
+
+    #[test]
+    fn test_lockitem_expired_newstyle_lease_duration() {
+        let item = LockItem {
+            owner_name: "test".into(),
+            record_version_number: "1".into(),
+            // Lease duration used to be a number of seconds (e.g. 60) which was wrong because
+            // DynamoDb needs a seconds since epoch. This sets that seconds since epoch value
+            lease_duration: Some(lease_duration_after(60)),
+            is_released: false,
+            data: Some("test-data".into()),
+            // For the test we'll pretend we looked up 2 minutes ago
+            lookup_time: (now_millis() - (2 * 60000)),
+            acquired_expired_lock: false,
+            is_non_acquirable: true,
+        };
+        assert_eq!(true, item.is_expired());
     }
 }

@@ -97,9 +97,9 @@ pub struct DynamoDbOptions {
     pub owner_name: String,
     /// The amount of time (in seconds) that the owner has for the acquired lock.
     pub lease_duration: u64,
-    /// The amount of time to wait before trying to get the lock again in milliseconds. Defaults to 1000ms (1 second).
+    /// The amount of time to wait before trying to get the lock again in milliseconds. Defaults to 10000ms (10s).
     pub refresh_period: Duration,
-    /// The amount of time to wait in addition to `lease_duration`.
+    /// The amount of time to wait in addition to `lease_duration`. Defaults to 10000ms (10s)
     pub additional_time_to_wait_for_lock: Duration,
 }
 
@@ -116,12 +116,12 @@ impl DynamoDbOptions {
         let refresh_period = Duration::from_millis(Self::u64_opt(
             &options,
             dynamo_lock_options::DYNAMO_LOCK_REFRESH_PERIOD_MILLIS,
-            1000,
+            10_000,
         ));
         let additional_time_to_wait_for_lock = Duration::from_millis(Self::u64_opt(
             &options,
             dynamo_lock_options::DYNAMO_LOCK_ADDITIONAL_TIME_TO_WAIT_MILLIS,
-            1000,
+            10_000,
         ));
 
         Self {
@@ -637,7 +637,7 @@ struct AcquireLockState<'a> {
 
 impl<'a> AcquireLockState<'a> {
     /// If lock is expirable (lease_duration is set) then this function returns `true`
-    /// if the elapsed time sine `started` is reached `timeout_in`.
+    /// if the elapsed time since `started` is reached `timeout_in`.
     fn has_timed_out(&self) -> bool {
         self.started.elapsed() > self.timeout_in && {
             let non_expirable = if let Some(ref cached_lock) = self.cached_lock {

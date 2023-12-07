@@ -342,7 +342,7 @@ mod vars {
  * ```
  */
 pub struct DynamoDbLockClient {
-    client: DynamoDbClient,
+    client: Box<dyn DynamoDb + Send + Sync>,
     opts: DynamoDbOptions,
 }
 
@@ -385,7 +385,7 @@ impl DynamoDbLockClient {
 
     /// Provide the given DynamoDbLockClient with a fully custom [rusoto_dynamodb::DynamoDbClient]
     pub fn with_client(mut self, client: DynamoDbClient) -> Self {
-        self.client = client;
+        self.client = Box::new(client);
         self
     }
 
@@ -397,7 +397,10 @@ impl DynamoDbLockClient {
 
     /// Creates new DynamoDB lock client
     fn new(client: DynamoDbClient, opts: DynamoDbOptions) -> Self {
-        Self { client, opts }
+        Self {
+            client: Box::new(client),
+            opts,
+        }
     }
 
     /// Attempts to acquire lock. If successful, returns the lock.
@@ -467,7 +470,7 @@ impl DynamoDbLockClient {
 
         if let Some(item) = output.item {
             let lease_duration = {
-                match item.get(LEASE_DURATION).and_then(|v| v.s.clone()) {
+                match item.get(LEASE_DURATION).and_then(|v| v.n.clone()) {
                     None => None,
                     Some(v) => Some(
                         v.parse::<u64>()
@@ -775,6 +778,7 @@ fn get_web_identity_provider() -> Result<AutoRefreshingProvider<WebIdentityProvi
 
 #[cfg(test)]
 mod tests {
+    mod mock_dyanmo_db;
     use super::*;
 
     use maplit::hashmap;
@@ -961,5 +965,34 @@ mod tests {
             is_non_acquirable: true,
         };
         assert_eq!(true, item.is_expired());
+    }
+
+    #[tokio::test]
+    async fn test_get_lock_numeric_lease_duration() {
+        use mock_dyanmo_db::MockDyanmoDbClient;
+        let mut mock1 = MockDyanmoDbClient::new();
+
+        mock1.expect_get_item().returning(|_| {
+            Ok(GetItemOutput {
+                consumed_capacity: None,
+                item: Some(HashMap::from([
+                    (PARTITION_KEY_NAME.to_string(), attr("delta-rs")),
+                    (
+                        LEASE_DURATION.to_string(),
+                        num_attr(lease_duration_after(0)),
+                    ),
+                    (OWNER_NAME.to_string(), attr(Uuid::new_v4())),
+                    (RECORD_VERSION_NUMBER.to_string(), attr(Uuid::new_v4())),
+                ])),
+            })
+        });
+
+        let client = DynamoDbLockClient {
+            client: Box::new(mock1),
+            opts: DynamoDbOptions::default(),
+        };
+
+        let t = client.get_lock().await.unwrap().unwrap();
+        assert!(t.lease_duration.is_some());
     }
 }
